@@ -19,6 +19,7 @@ service-file:
 	@echo "WantedBy=multi-user.target" | sudo tee -a $(SERVICE_FILE) > /dev/null
 
 deploy: install service-file
+	sudo systemctl stop $(SERVICE_NAME) 2>/dev/null || true
 	sudo systemctl daemon-reload
 	sudo systemctl enable $(SERVICE_NAME)
 	sudo systemctl restart $(SERVICE_NAME)

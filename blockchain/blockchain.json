@@ -1,0 +1,37 @@
+{
+  "blocks": [
+    {
+      "timestamp": "2025-10-23T15:53:40.422074+01:00",
+      "index": 0,
+      "data": "Genesis Block",
+      "previous_hash": "0",
+      "hash": "00003712879f9e4c1403f999acaeb096ba9f767e0d954f334e86005c345eab49",
+      "nonce": 4662
+    },
+    {
+      "timestamp": "2025-10-23T15:53:40.426141+01:00",
+      "index": 1,
+      "data": "First transaction: Alice sends 10 coins to Bob",
+      "previous_hash": "00003712879f9e4c1403f999acaeb096ba9f767e0d954f334e86005c345eab49",
+      "hash": "000055d7b0088693949739f31348fe849f5efef96ab174af872035292aa4ac78",
+      "nonce": 20223
+    },
+    {
+      "timestamp": "2025-10-23T15:53:40.442602+01:00",
+      "index": 2,
+      "data": "Second transaction: Bob sends 5 coins to Charlie",
+      "previous_hash": "000055d7b0088693949739f31348fe849f5efef96ab174af872035292aa4ac78",
+      "hash": "00004cda2e5d85c6d5294c77558cf108c5c33737f914282057439ef214a33a81",
+      "nonce": 13696
+    },
+    {
+      "timestamp": "2025-10-23T15:53:40.451086+01:00",
+      "index": 3,
+      "data": "Third transaction: Charlie sends 3 coins to Alice",
+      "previous_hash": "00004cda2e5d85c6d5294c77558cf108c5c33737f914282057439ef214a33a81",
+      "hash": "00004f7bc5f882fc632485bdaf556f8972985b1011395f44137ce293066d3b3f",
+      "nonce": 50537
+    }
+  ],
+  "difficulty": 4
+}

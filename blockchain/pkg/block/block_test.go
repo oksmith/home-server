@@ -4,16 +4,33 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oksmith/home-server/blockchain/pkg/transaction"
 )
 
+// createTestTransaction creates a simple test transaction
+func createTestTransaction(from, to string, amount float64) *transaction.Transaction {
+	tx := transaction.New(from, to, amount)
+	// Set a fixed timestamp for deterministic testing
+	tx.Timestamp = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	// Generate ID manually for testing
+	tx.ID = tx.Hash()
+	return tx
+}
+
 func TestNew(t *testing.T) {
-	b := New(1, "test data", "prev_hash")
+	tx := createTestTransaction("alice", "bob", 10.0)
+	transactions := []*transaction.Transaction{tx}
+	b := New(1, transactions, "prev_hash")
 
 	if b.Index != 1 {
 		t.Errorf("expected index 1, got %d", b.Index)
 	}
-	if b.Data != "test data" {
-		t.Errorf("expected data 'test data', got %s", b.Data)
+	if len(b.Transactions) != 1 {
+		t.Errorf("expected 1 transaction, got %d", len(b.Transactions))
+	}
+	if b.Transactions[0].From != "alice" {
+		t.Errorf("expected transaction from 'alice', got %s", b.Transactions[0].From)
 	}
 	if b.PreviousHash != "prev_hash" {
 		t.Errorf("expected previous hash 'prev_hash', got %s", b.PreviousHash)
@@ -24,7 +41,9 @@ func TestNew(t *testing.T) {
 }
 
 func TestCalculateHash(t *testing.T) {
-	b := New(0, "genesis", "0")
+	tx := createTestTransaction("genesis", "alice", 100.0)
+	transactions := []*transaction.Transaction{tx}
+	b := New(0, transactions, "0")
 	b.Timestamp = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	hash1 := b.CalculateHash()
@@ -40,11 +59,11 @@ func TestCalculateHash(t *testing.T) {
 		t.Errorf("expected hash length 64, got %d", len(hash1))
 	}
 
-	// Changing data should change hash
-	b.Data = "different data"
+	// Changing transaction should change hash
+	b.Transactions[0].Amount = 200.0
 	hash3 := b.CalculateHash()
 	if hash1 == hash3 {
-		t.Errorf("changing data should change hash")
+		t.Errorf("changing transaction should change hash")
 	}
 }
 
@@ -60,7 +79,9 @@ func TestMine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b := New(0, "test", "0")
+			tx := createTestTransaction("alice", "bob", 10.0)
+			transactions := []*transaction.Transaction{tx}
+			b := New(0, transactions, "0")
 			b.Mine(tt.difficulty)
 
 			// Check that hash has required leading zeros
@@ -84,7 +105,9 @@ func TestMine(t *testing.T) {
 }
 
 func TestIsValid(t *testing.T) {
-	b := New(0, "test", "0")
+	tx := createTestTransaction("alice", "bob", 10.0)
+	transactions := []*transaction.Transaction{tx}
+	b := New(0, transactions, "0")
 	b.Mine(2)
 
 	// Should be valid after mining
@@ -92,10 +115,10 @@ func TestIsValid(t *testing.T) {
 		t.Errorf("freshly mined block should be valid")
 	}
 
-	// Tampering with data should invalidate
-	b.Data = "tampered"
+	// Tampering with transaction should invalidate
+	b.Transactions[0].Amount = 999.0
 	if b.IsValid() {
-		t.Errorf("block with tampered data should be invalid")
+		t.Errorf("block with tampered transaction should be invalid")
 	}
 
 	// Recalculate hash - should be valid again
@@ -108,11 +131,19 @@ func TestIsValid(t *testing.T) {
 func TestHashDeterminism(t *testing.T) {
 	// Two blocks with identical properties should have identical hashes
 	timestamp := time.Now()
+	tx1 := createTestTransaction("alice", "bob", 10.0)
+	tx2 := createTestTransaction("alice", "bob", 10.0)
+
+	// Set same timestamp for both transactions
+	tx1.Timestamp = timestamp
+	tx2.Timestamp = timestamp
+	tx1.ID = tx1.Hash()
+	tx2.ID = tx2.Hash()
 
 	b1 := &Block{
 		Index:        1,
 		Timestamp:    timestamp,
-		Data:         "test",
+		Transactions: []*transaction.Transaction{tx1},
 		PreviousHash: "prev",
 		Nonce:        42,
 	}
@@ -120,7 +151,7 @@ func TestHashDeterminism(t *testing.T) {
 	b2 := &Block{
 		Index:        1,
 		Timestamp:    timestamp,
-		Data:         "test",
+		Transactions: []*transaction.Transaction{tx2},
 		PreviousHash: "prev",
 		Nonce:        42,
 	}
@@ -134,7 +165,9 @@ func TestHashDeterminism(t *testing.T) {
 }
 
 func TestNonceImpactsHash(t *testing.T) {
-	b := New(0, "test", "0")
+	tx := createTestTransaction("alice", "bob", 10.0)
+	transactions := []*transaction.Transaction{tx}
+	b := New(0, transactions, "0")
 
 	hash1 := b.CalculateHash()
 	b.Nonce = 1
@@ -152,7 +185,9 @@ func BenchmarkMine(b *testing.B) {
 	for _, diff := range difficulties {
 		b.Run(string(rune('0'+diff)), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				block := New(0, "benchmark", "0")
+				tx := createTestTransaction("alice", "bob", 10.0)
+				transactions := []*transaction.Transaction{tx}
+				block := New(0, transactions, "0")
 				block.Mine(diff)
 			}
 		})

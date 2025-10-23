@@ -6,24 +6,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/oksmith/home-server/blockchain/pkg/transaction"
 )
 
 // Block represents a single block in the blockchain
 type Block struct {
-	Index        int64     `json:"index"`
-	Timestamp    time.Time `json:"timestamp"`
-	Data         string    `json:"data"`
-	PreviousHash string    `json:"previous_hash"`
-	Hash         string    `json:"hash"`
-	Nonce        int64     `json:"nonce"`
+	Index        int64                      `json:"index"`
+	Timestamp    time.Time                  `json:"timestamp"`
+	Transactions []*transaction.Transaction `json:"transactions"`
+	PreviousHash string                     `json:"previous_hash"`
+	Hash         string                     `json:"hash"`
+	Nonce        int64                      `json:"nonce"`
 }
 
-// New creates a new block with the given data
-func New(index int64, data string, previousHash string) *Block {
+// New creates a new block with the given transactions
+func New(index int64, transactions []*transaction.Transaction, previousHash string) *Block {
 	b := &Block{
 		Index:        index,
 		Timestamp:    time.Now(),
-		Data:         data,
+		Transactions: transactions,
 		PreviousHash: previousHash,
 		Nonce:        0,
 	}
@@ -32,10 +34,16 @@ func New(index int64, data string, previousHash string) *Block {
 
 // CalculateHash computes the SHA-256 hash of the block's contents
 func (b *Block) CalculateHash() string {
+	// Include all transaction IDs in the hash
+	txData := ""
+	for _, tx := range b.Transactions {
+		txData += tx.ID
+	}
+
 	record := fmt.Sprintf("%d%s%s%s%d",
 		b.Index,
 		b.Timestamp.Format(time.RFC3339Nano),
-		b.Data,
+		txData,
 		b.PreviousHash,
 		b.Nonce,
 	)
@@ -55,7 +63,8 @@ func (b *Block) Mine(difficulty int) {
 	for {
 		b.Hash = b.CalculateHash()
 		if b.Hash[:difficulty] == targetStr {
-			fmt.Printf("Mined block %d with hash: %s (nonce: %d)\n", b.Index, b.Hash, b.Nonce)
+			fmt.Printf("Mined block %d with %d transactions (nonce: %d)\n",
+				b.Index, len(b.Transactions), b.Nonce)
 			return
 		}
 		b.Nonce++

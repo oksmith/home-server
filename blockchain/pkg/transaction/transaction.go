@@ -65,7 +65,13 @@ func (tx *Transaction) Sign(privateKey *ecdsa.PrivateKey) error {
 		return fmt.Errorf("failed to sign transaction: %w", err)
 	}
 
-	tx.Signature = append(r.Bytes(), s.Bytes()...)
+	// Encode signature as r || s, padded to 32 bytes each
+	signature := make([]byte, 64)
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	copy(signature[32-len(rBytes):32], rBytes)
+	copy(signature[64-len(sBytes):64], sBytes)
+	tx.Signature = signature
 	tx.ID = tx.Hash()
 	return nil
 }

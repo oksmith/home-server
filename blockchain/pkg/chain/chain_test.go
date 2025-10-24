@@ -1,6 +1,9 @@
 package chain
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"os"
 	"testing"
 	"time"
@@ -10,13 +13,22 @@ import (
 )
 
 // createTestTransaction creates a simple test transaction
-func createTestTransaction(from, to string, amount float64) *transaction.Transaction {
+// Returns the transaction and the public key used to sign it
+func createTestTransaction(from, to string, amount float64) (*transaction.Transaction, *ecdsa.PublicKey) {
+	privateKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	tx := transaction.New(from, to, amount)
 	// Set a fixed timestamp for deterministic testing
 	tx.Timestamp = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	// Generate ID manually for testing
-	tx.ID = tx.Hash()
-	return tx
+	// Sign the transaction
+	tx.Sign(privateKey)
+	return tx, &privateKey.PublicKey
+}
+
+// fundAddresses funds a list of addresses by mining empty blocks for each
+func fundAddresses(c *Chain, addresses ...string) {
+	for _, addr := range addresses {
+		c.AddBlock([]*transaction.Transaction{}, addr)
+	}
 }
 
 func TestNew(t *testing.T) {
@@ -47,8 +59,10 @@ func TestNew(t *testing.T) {
 func TestAddBlock(t *testing.T) {
 	c := New(2, 10.0)
 
-	// Create a test transaction
-	tx := createTestTransaction("alice", "bob", 5.0)
+	fundAddresses(c, "alice")
+
+	tx, pubKey := createTestTransaction("alice", "bob", 5.0)
+	c.RegisterPublicKey(tx.From, pubKey)
 	transactions := []*transaction.Transaction{tx}
 
 	err := c.AddBlock(transactions, "miner")
@@ -56,16 +70,16 @@ func TestAddBlock(t *testing.T) {
 		t.Fatalf("failed to add block: %v", err)
 	}
 
-	if len(c.Blocks) != 2 {
-		t.Errorf("expected 2 blocks, got %d", len(c.Blocks))
+	if len(c.Blocks) != 3 {
+		t.Errorf("expected 3 blocks, got %d", len(c.Blocks))
 	}
 
 	// Check block was properly linked
-	newBlock := c.Blocks[1]
-	prevBlock := c.Blocks[0]
+	newBlock := c.Blocks[2]
+	prevBlock := c.Blocks[1]
 
-	if newBlock.Index != 1 {
-		t.Errorf("expected index 1, got %d", newBlock.Index)
+	if newBlock.Index != 2 {
+		t.Errorf("expected index 2, got %d", newBlock.Index)
 	}
 	if newBlock.PreviousHash != prevBlock.Hash {
 		t.Errorf("new block's previous hash doesn't match previous block's hash")
@@ -80,10 +94,19 @@ func TestAddBlock(t *testing.T) {
 func TestAddMultipleBlocks(t *testing.T) {
 	c := New(2, 10.0)
 
-	// Create multiple transactions for different blocks
-	transactions1 := []*transaction.Transaction{createTestTransaction("alice", "bob", 5.0)}
-	transactions2 := []*transaction.Transaction{createTestTransaction("bob", "charlie", 3.0)}
-	transactions3 := []*transaction.Transaction{createTestTransaction("charlie", "alice", 2.0)}
+	fundAddresses(c, "alice", "bob", "charlie")
+
+	tx1, pk1 := createTestTransaction("alice", "bob", 5.0)
+	tx2, pk2 := createTestTransaction("bob", "charlie", 3.0)
+	tx3, pk3 := createTestTransaction("charlie", "alice", 2.0)
+
+	c.RegisterPublicKey(tx1.From, pk1)
+	c.RegisterPublicKey(tx2.From, pk2)
+	c.RegisterPublicKey(tx3.From, pk3)
+
+	transactions1 := []*transaction.Transaction{tx1}
+	transactions2 := []*transaction.Transaction{tx2}
+	transactions3 := []*transaction.Transaction{tx3}
 
 	allTransactions := [][]*transaction.Transaction{transactions1, transactions2, transactions3}
 	for i, txs := range allTransactions {
@@ -92,8 +115,8 @@ func TestAddMultipleBlocks(t *testing.T) {
 		}
 	}
 
-	if len(c.Blocks) != 4 { // genesis + 3 blocks
-		t.Errorf("expected 4 blocks, got %d", len(c.Blocks))
+	if len(c.Blocks) != 7 { // genesis + 3 funding + 3 transaction blocks
+		t.Errorf("expected 7 blocks, got %d", len(c.Blocks))
 	}
 
 	// Verify chain integrity
@@ -105,8 +128,13 @@ func TestAddMultipleBlocks(t *testing.T) {
 func TestIsValid(t *testing.T) {
 	c := New(2, 10.0)
 
-	tx1 := createTestTransaction("alice", "bob", 5.0)
-	tx2 := createTestTransaction("bob", "charlie", 3.0)
+	fundAddresses(c, "alice", "bob")
+
+	tx1, pk1 := createTestTransaction("alice", "bob", 5.0)
+	tx2, pk2 := createTestTransaction("bob", "charlie", 3.0)
+
+	c.RegisterPublicKey(tx1.From, pk1)
+	c.RegisterPublicKey(tx2.From, pk2)
 
 	c.AddBlock([]*transaction.Transaction{tx1}, "miner")
 	c.AddBlock([]*transaction.Transaction{tx2}, "miner")
@@ -119,14 +147,19 @@ func TestIsValid(t *testing.T) {
 func TestIsValidDetectsTampering(t *testing.T) {
 	c := New(2, 10.0)
 
-	tx1 := createTestTransaction("alice", "bob", 5.0)
-	tx2 := createTestTransaction("bob", "charlie", 3.0)
+	fundAddresses(c, "alice", "bob")
+
+	tx1, pk1 := createTestTransaction("alice", "bob", 5.0)
+	tx2, pk2 := createTestTransaction("bob", "charlie", 3.0)
+
+	c.RegisterPublicKey(tx1.From, pk1)
+	c.RegisterPublicKey(tx2.From, pk2)
 
 	c.AddBlock([]*transaction.Transaction{tx1}, "miner")
 	c.AddBlock([]*transaction.Transaction{tx2}, "miner")
 
-	// Tamper with transaction in middle block
-	c.Blocks[1].Transactions[1].Amount = 999.0 // Tamper with the user transaction (index 1, not coinbase)
+	// Tamper with transaction in a block with a user transaction
+	c.Blocks[3].Transactions[1].Amount = 999.0 // Tamper with the user transaction (index 1, not coinbase)
 
 	if c.IsValid() {
 		t.Errorf("chain should be invalid after tampering with transaction")
@@ -136,8 +169,13 @@ func TestIsValidDetectsTampering(t *testing.T) {
 func TestIsValidDetectsHashTampering(t *testing.T) {
 	c := New(2, 10.0)
 
-	tx1 := createTestTransaction("alice", "bob", 5.0)
-	tx2 := createTestTransaction("bob", "charlie", 3.0)
+	fundAddresses(c, "alice", "bob")
+
+	tx1, pk1 := createTestTransaction("alice", "bob", 5.0)
+	tx2, pk2 := createTestTransaction("bob", "charlie", 3.0)
+
+	c.RegisterPublicKey(tx1.From, pk1)
+	c.RegisterPublicKey(tx2.From, pk2)
 
 	c.AddBlock([]*transaction.Transaction{tx1}, "miner")
 	c.AddBlock([]*transaction.Transaction{tx2}, "miner")
@@ -153,8 +191,13 @@ func TestIsValidDetectsHashTampering(t *testing.T) {
 func TestIsValidDetectsBrokenLinks(t *testing.T) {
 	c := New(2, 10.0)
 
-	tx1 := createTestTransaction("alice", "bob", 5.0)
-	tx2 := createTestTransaction("bob", "charlie", 3.0)
+	fundAddresses(c, "alice", "bob")
+
+	tx1, pk1 := createTestTransaction("alice", "bob", 5.0)
+	tx2, pk2 := createTestTransaction("bob", "charlie", 3.0)
+
+	c.RegisterPublicKey(tx1.From, pk1)
+	c.RegisterPublicKey(tx2.From, pk2)
 
 	c.AddBlock([]*transaction.Transaction{tx1}, "miner")
 	c.AddBlock([]*transaction.Transaction{tx2}, "miner")
@@ -179,7 +222,7 @@ func TestValidateNewBlock(t *testing.T) {
 			name: "valid block",
 			setup: func() (*block.Block, *block.Block) {
 				prev := c.Blocks[0]
-				tx := createTestTransaction("alice", "bob", 5.0)
+				tx, _ := createTestTransaction("alice", "bob", 5.0)
 				new := block.New(1, []*transaction.Transaction{tx}, prev.Hash)
 				new.Mine(c.Difficulty)
 				return new, prev
@@ -190,7 +233,7 @@ func TestValidateNewBlock(t *testing.T) {
 			name: "wrong index",
 			setup: func() (*block.Block, *block.Block) {
 				prev := c.Blocks[0]
-				tx := createTestTransaction("alice", "bob", 5.0)
+				tx, _ := createTestTransaction("alice", "bob", 5.0)
 				new := block.New(5, []*transaction.Transaction{tx}, prev.Hash) // Should be 1, not 5
 				new.Mine(c.Difficulty)
 				return new, prev
@@ -201,7 +244,7 @@ func TestValidateNewBlock(t *testing.T) {
 			name: "wrong previous hash",
 			setup: func() (*block.Block, *block.Block) {
 				prev := c.Blocks[0]
-				tx := createTestTransaction("alice", "bob", 5.0)
+				tx, _ := createTestTransaction("alice", "bob", 5.0)
 				new := block.New(1, []*transaction.Transaction{tx}, "wrong_hash")
 				new.Mine(c.Difficulty)
 				return new, prev
@@ -212,9 +255,10 @@ func TestValidateNewBlock(t *testing.T) {
 			name: "insufficient proof of work",
 			setup: func() (*block.Block, *block.Block) {
 				prev := c.Blocks[0]
-				tx := createTestTransaction("alice", "bob", 5.0)
+				tx, _ := createTestTransaction("alice", "bob", 5.0)
 				new := block.New(1, []*transaction.Transaction{tx}, prev.Hash)
-				new.Mine(1) // Mine with lower difficulty than required
+				// Set a hash with only 1 leading zero to ensure it fails difficulty 2
+				new.Hash = "0abcdef1234567890abcdef1234567890abcdef1234567890abcdef123456789"
 				return new, prev
 			},
 			wantErr: true,
@@ -237,8 +281,13 @@ func TestSaveAndLoadFromFile(t *testing.T) {
 	// Create a test chain
 	c := New(2, 10.0)
 
-	tx1 := createTestTransaction("alice", "bob", 5.0)
-	tx2 := createTestTransaction("bob", "charlie", 3.0)
+	fundAddresses(c, "alice", "bob")
+
+	tx1, pk1 := createTestTransaction("alice", "bob", 5.0)
+	tx2, pk2 := createTestTransaction("bob", "charlie", 3.0)
+
+	c.RegisterPublicKey(tx1.From, pk1)
+	c.RegisterPublicKey(tx2.From, pk2)
 
 	c.AddBlock([]*transaction.Transaction{tx1}, "miner")
 	c.AddBlock([]*transaction.Transaction{tx2}, "miner")
@@ -289,15 +338,20 @@ func TestSaveAndLoadFromFile(t *testing.T) {
 func TestGetLatestBlock(t *testing.T) {
 	c := New(2, 10.0)
 
-	tx1 := createTestTransaction("alice", "bob", 5.0)
-	tx2 := createTestTransaction("bob", "charlie", 3.0)
+	fundAddresses(c, "alice", "bob")
+
+	tx1, pk1 := createTestTransaction("alice", "bob", 5.0)
+	tx2, pk2 := createTestTransaction("bob", "charlie", 3.0)
+
+	c.RegisterPublicKey(tx1.From, pk1)
+	c.RegisterPublicKey(tx2.From, pk2)
 
 	c.AddBlock([]*transaction.Transaction{tx1}, "miner")
 	c.AddBlock([]*transaction.Transaction{tx2}, "miner")
 
 	latest := c.GetLatestBlock()
-	if latest.Index != 2 {
-		t.Errorf("expected latest block index 2, got %d", latest.Index)
+	if latest.Index != 4 {
+		t.Errorf("expected latest block index 4, got %d", latest.Index)
 	}
 	if len(latest.Transactions) != 2 {
 		t.Errorf("expected 2 transactions in latest block, got %d", len(latest.Transactions))
@@ -310,10 +364,13 @@ func TestLength(t *testing.T) {
 		t.Errorf("expected length 1, got %d", c.Length())
 	}
 
-	tx := createTestTransaction("alice", "bob", 5.0)
+	fundAddresses(c, "alice")
+
+	tx, pk := createTestTransaction("alice", "bob", 5.0)
+	c.RegisterPublicKey(tx.From, pk)
 	c.AddBlock([]*transaction.Transaction{tx}, "miner")
-	if c.Length() != 2 {
-		t.Errorf("expected length 2, got %d", c.Length())
+	if c.Length() != 3 {
+		t.Errorf("expected length 3, got %d", c.Length())
 	}
 }
 
@@ -321,17 +378,23 @@ func TestChainIntegrity(t *testing.T) {
 	// This test verifies that you can't easily tamper with the chain
 	c := New(3, 10.0) // Higher difficulty for this test
 
-	tx1 := createTestTransaction("alice", "bob", 5.0)
-	tx2 := createTestTransaction("bob", "charlie", 3.0)
-	tx3 := createTestTransaction("charlie", "alice", 2.0)
+	fundAddresses(c, "alice", "bob", "charlie")
+
+	tx1, pk1 := createTestTransaction("alice", "bob", 5.0)
+	tx2, pk2 := createTestTransaction("bob", "charlie", 3.0)
+	tx3, pk3 := createTestTransaction("charlie", "alice", 2.0)
+
+	c.RegisterPublicKey(tx1.From, pk1)
+	c.RegisterPublicKey(tx2.From, pk2)
+	c.RegisterPublicKey(tx3.From, pk3)
 
 	c.AddBlock([]*transaction.Transaction{tx1}, "miner")
 	c.AddBlock([]*transaction.Transaction{tx2}, "miner")
 	c.AddBlock([]*transaction.Transaction{tx3}, "miner")
 
 	// Attempt to tamper with middle block and recalculate its hash
-	c.Blocks[1].Transactions[1].Amount = 999.0 // Tamper with user transaction
-	c.Blocks[1].Hash = c.Blocks[1].CalculateHash()
+	c.Blocks[4].Transactions[1].Amount = 999.0 // Tamper with user transaction
+	c.Blocks[4].Hash = c.Blocks[4].CalculateHash()
 
 	// Chain should still be invalid because the next block's
 	// PreviousHash won't match the new hash

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 )
 
 // Wallet represents a blockchain wallet with public/private key pair
@@ -47,8 +48,12 @@ func (w *Wallet) Sign(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to sign: %w", err)
 	}
 
-	// Encode signature as r || s
-	signature := append(r.Bytes(), s.Bytes()...)
+	// Encode signature as r || s, padded to 32 bytes each
+	signature := make([]byte, 64)
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	copy(signature[32-len(rBytes):32], rBytes)
+	copy(signature[64-len(sBytes):64], sBytes)
 	return signature, nil
 }
 
@@ -61,10 +66,8 @@ func VerifySignature(publicKey *ecdsa.PublicKey, data, signature []byte) bool {
 		return false
 	}
 
-	r := new(ecdsa.PublicKey).X
-	s := new(ecdsa.PublicKey).Y
-	r.SetBytes(signature[:32])
-	s.SetBytes(signature[32:])
+	r := new(big.Int).SetBytes(signature[:32])
+	s := new(big.Int).SetBytes(signature[32:])
 
 	return ecdsa.Verify(publicKey, hash[:], r, s)
 }

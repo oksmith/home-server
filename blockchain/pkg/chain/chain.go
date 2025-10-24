@@ -212,17 +212,9 @@ func LoadFromFile(filename string) (*Chain, error) {
 		return nil, err
 	}
 
-	// Rebuild balances from blocks
-	c.balances = make(map[string]float64)
-	c.publicKeys = make(map[string]*ecdsa.PublicKey)
-
-	for _, block := range c.Blocks {
-		for _, tx := range block.Transactions {
-			if !tx.IsCoinbase() {
-				c.balances[tx.From] -= tx.Amount
-			}
-			c.balances[tx.To] += tx.Amount
-		}
+	// Rebuild state from blocks
+	if err := c.RebuildState(); err != nil {
+		return nil, err
 	}
 
 	return &c, nil
@@ -236,4 +228,28 @@ func (c *Chain) GetLatestBlock() *block.Block {
 // Length returns the number of blocks in the chain
 func (c *Chain) Length() int {
 	return len(c.Blocks)
+}
+
+// RebuildState reconstructs balances and public keys from the blockchain
+// This is needed when loading a chain from JSON or syncing from peers
+func (c *Chain) RebuildState() error {
+	// Initialize maps if they're nil
+	if c.balances == nil {
+		c.balances = make(map[string]float64)
+	}
+	if c.publicKeys == nil {
+		c.publicKeys = make(map[string]*ecdsa.PublicKey)
+	}
+
+	// Replay all transactions from all blocks to rebuild state
+	for _, block := range c.Blocks {
+		for _, tx := range block.Transactions {
+			if !tx.IsCoinbase() {
+				c.balances[tx.From] -= tx.Amount
+			}
+			c.balances[tx.To] += tx.Amount
+		}
+	}
+
+	return nil
 }
